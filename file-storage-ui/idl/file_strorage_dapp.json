@@ -1,0 +1,150 @@
+{
+  "address": "5P7jKeEDL96XVeyLq8sBmLKFW2GHX7HNd6Y4nXcyHkEB",
+  "metadata": {
+    "name": "file_storage_dapp",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "get_file_record",
+      "discriminator": [211, 223, 42, 4, 64, 129, 76, 75],
+      "accounts": [
+        {
+          "name": "file_record"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "register_file",
+      "discriminator": [198, 84, 177, 221, 58, 216, 65, 104],
+      "accounts": [
+        {
+          "name": "file_record",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [102, 105, 108, 101]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              },
+              {
+                "kind": "arg",
+                "path": "file_hash"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "file_hash",
+          "type": {
+            "array": ["u8", 32]
+          }
+        }
+      ]
+    },
+    {
+      "name": "verify_file",
+      "discriminator": [156, 92, 144, 96, 95, 22, 25, 70],
+      "accounts": [
+        {
+          "name": "file_record",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [102, 105, 108, 101]
+              },
+              {
+                "kind": "account",
+                "path": "file_record.owner",
+                "account": "FileRecord"
+              },
+              {
+                "kind": "arg",
+                "path": "file_hash"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "file_hash",
+          "type": {
+            "array": ["u8", 32]
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "FileRecord",
+      "discriminator": [112, 46, 49, 238, 12, 221, 189, 126]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidHash",
+      "msg": "Invalid file hash provided"
+    },
+    {
+      "code": 6001,
+      "name": "HashMismatch",
+      "msg": "File hash does not match the stored value"
+    },
+    {
+      "code": 6002,
+      "name": "FileAlreadyExists",
+      "msg": "File already registered"
+    },
+    {
+      "code": 6003,
+      "name": "Unauthorized",
+      "msg": "Unauthorized operation"
+    }
+  ],
+  "types": [
+    {
+      "name": "FileRecord",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "type": "pubkey"
+          },
+          {
+            "name": "file_hash",
+            "type": {
+              "array": ["u8", 32]
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}
