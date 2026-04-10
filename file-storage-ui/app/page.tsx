@@ -1,18 +1,17 @@
 "use client";
 
 import "./styles.css";
-
 import "./login/page";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { getProgram } from "../lib/anchor";
 import { AnchorWallet } from "@solana/wallet-adapter-react";
 import dynamic from "next/dynamic";
 import { PublicKey, SystemProgram } from "@solana/web3.js";
-
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+
+import { uploadToIPFS } from "../lib/ipfs";
 
 const WalletMultiButtonDynamic = dynamic(
   async () =>
@@ -40,14 +39,27 @@ export default function Home() {
   const [verifyTx, setVerifyTx] = useState<string | null>(null);
   const [accountLink, setAccountLink] = useState<string | null>(null);
 
-  // 🔹 HANDLE FILE INPUT
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [cid, setCid] = useState<string | null>(null);
+  const [ipfsLink, setIpfsLink] = useState<string | null>(null);
+
+  const [fileType, setFileType] = useState<string | null>(null);
+
+  // 🔹 FILE INPUT
+  /*const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setFile(e.target.files[0]);
     }
+  };*/
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+
+      setFile(selectedFile);
+      setFileType(selectedFile.type); // 🔥 ADD THIS
+    }
   };
 
-  // 🔹 GENERATE HASH
+  // 🔹 HASH GENERATION
   const generateFileHash = async () => {
     if (!file) {
       alert("Please select a file first");
@@ -67,56 +79,71 @@ export default function Home() {
     setFileHashBytes(new Uint8Array(hashBuffer));
   };
 
-  // 🔹 REGISTER FILE
+  // 🔹 REGISTER FILE + IPFS
   const registerFile = async () => {
     if (!wallet.publicKey) {
       alert("Connect wallet first");
       return;
     }
 
-    if (!fileHashBytes) {
+    if (!file || !fileHashBytes) {
       alert("Generate file hash first");
       return;
     }
 
-    const program = getProgram(wallet as AnchorWallet);
+    try {
+      const program = getProgram(wallet as AnchorWallet);
 
-    const [fileRecordPDA] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("file"),
-        wallet.publicKey.toBuffer(),
-        Buffer.from(fileHashBytes),
-      ],
-      program.programId
-    );
+      // 🔥 1. Upload to IPFS
+      const cid = await uploadToIPFS(file);
+      const ipfsUrl = `https://gateway.pinata.cloud/ipfs/${cid}`;
 
-    const existing = await (
-      program.account as {
-        fileRecord: { fetchNullable: (pda: PublicKey) => Promise<unknown> };
+      setCid(cid);
+      setIpfsLink(ipfsUrl);
+
+      // 🔥 2. PDA
+      const [fileRecordPDA] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("file"),
+          wallet.publicKey.toBuffer(),
+          Buffer.from(fileHashBytes),
+        ],
+        program.programId
+      );
+
+      // 🔥 3. Check duplicate
+      const existing = await (
+        program.account as {
+          fileRecord: { fetchNullable: (pda: PublicKey) => Promise<unknown> };
+        }
+      ).fileRecord.fetchNullable(fileRecordPDA);
+
+      if (existing) {
+        alert("⚠️ File already registered");
+        return;
       }
-    ).fileRecord.fetchNullable(fileRecordPDA);
 
-    if (existing) {
-      alert("⚠️ File already registered on-chain");
-      return;
+      // 🔥 4. Store on-chain
+      const signature = await program.methods
+        .registerFile([...fileHashBytes])
+        .accounts({
+          fileRecord: fileRecordPDA,
+          user: wallet.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+
+      const txLink = `https://explorer.solana.com/tx/${signature}?cluster=devnet`;
+      const accLink = `https://explorer.solana.com/address/${fileRecordPDA.toString()}?cluster=devnet`;
+
+      setRegisterTx(txLink);
+      setAccountLink(accLink);
+
+      alert("✅ File uploaded to IPFS + registered on-chain");
+    } catch (err) {
+      console.error(err);
+      alert("❌ Upload failed");
     }
-
-    const signature = await program.methods
-      .registerFile([...fileHashBytes])
-      .accounts({
-        fileRecord: fileRecordPDA,
-        user: wallet.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
-
-    const txLink = `https://explorer.solana.com/tx/${signature}?cluster=devnet`;
-    const accLink = `https://explorer.solana.com/address/${fileRecordPDA.toString()}?cluster=devnet`;
-
-    setRegisterTx(txLink);
-    setAccountLink(accLink);
-
-    alert("File has been successfully registered on the solana blockchain");
   };
 
   // 🔹 HEX → BYTES
@@ -124,7 +151,7 @@ export default function Home() {
     const cleanHex = hex.trim().toLowerCase();
 
     if (!/^[0-9a-f]{64}$/.test(cleanHex)) {
-      throw new Error("Invalid hash format (must be 64 hex chars)");
+      throw new Error("Invalid hash format");
     }
 
     const bytes = new Uint8Array(32);
@@ -136,7 +163,7 @@ export default function Home() {
     return bytes;
   };
 
-  // 🔹 VERIFY FILE
+  // 🔹 VERIFY
   const verifyFile = async () => {
     if (!wallet.publicKey) {
       alert("Connect wallet first");
@@ -144,13 +171,12 @@ export default function Home() {
     }
 
     if (!verifyHash) {
-      alert("Enter a file hash to verify");
+      alert("Enter a file hash");
       return;
     }
 
     try {
       const program = getProgram(wallet as AnchorWallet);
-
       const hashBytes = hexToBytes(verifyHash);
 
       const [fileRecordPDA] = PublicKey.findProgramAddressSync(
@@ -175,12 +201,10 @@ export default function Home() {
       setVerifyTx(txLink);
       setAccountLink(accLink);
 
-      alert(
-        "File has been VERIFIED on the solana blockchain, the hash matches the registered record"
-      );
+      alert("✅ File verified successfully");
     } catch (err) {
       console.error(err);
-      alert("❌ File NOT found or hash mismatch");
+      alert("❌ File NOT found");
     }
   };
 
@@ -188,13 +212,11 @@ export default function Home() {
 
   return (
     <div className="page-container">
-      {/* 🔝 TOP BAR */}
       <div className="top-bar">
         <div className="logo">⚡ Blockchain file storage system</div>
         <WalletMultiButtonDynamic />
       </div>
 
-      {/* 🔥 CENTERED CONTENT */}
       <div className="center-wrapper">
         {/* 🔹 UPLOAD */}
         <div className="card">
@@ -220,6 +242,42 @@ export default function Home() {
             <p className="hash-text">
               <strong>Hash:</strong> {fileHash}
             </p>
+          )}
+
+          {/* 🔥 IPFS LINK HERE */}
+          {ipfsLink && (
+            <p className="mt-2">
+              🌐{" "}
+              <a href={ipfsLink} target="_blank" className="link blue">
+                View File on IPFS
+              </a>
+            </p>
+          )}
+
+          {ipfsLink && fileType && (
+            <div className="preview-container">
+              <h3>Preview</h3>
+
+              {/* 🖼 IMAGE PREVIEW */}
+              {fileType.startsWith("image/") && (
+                <img
+                  src={ipfsLink}
+                  alt="Uploaded file"
+                  className="preview-image"
+                />
+              )}
+
+              {/* 📄 PDF PREVIEW */}
+              {fileType === "application/pdf" && (
+                <iframe src={ipfsLink} className="preview-pdf" />
+              )}
+
+              {/* 📦 FALLBACK */}
+              {!fileType.startsWith("image/") &&
+                fileType !== "application/pdf" && (
+                  <p>Preview not available for this file type.</p>
+                )}
+            </div>
           )}
 
           {registerTx && (
@@ -253,12 +311,6 @@ export default function Home() {
           {verifyTx && (
             <a href={verifyTx} target="_blank" className="link green">
               View Verify Transaction
-            </a>
-          )}
-
-          {accountLink && (
-            <a href={accountLink} target="_blank" className="link purple">
-              View On-chain Record
             </a>
           )}
         </div>
